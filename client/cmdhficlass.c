@@ -41,6 +41,7 @@ int usage_hf_iclass_sim(void) {
 	PrintAndLog("        hf iclass sim 2");
 	PrintAndLog("        hf iclass eload 'tagdump.bin'");
 	PrintAndLog("        hf iclass sim 3");
+	PrintAndLog("        hf iclass sim 4");
 	return 0;
 }
 int usage_hf_iclass_eload(void) {
@@ -118,7 +119,7 @@ int usage_hf_iclass_writeblock(void) {
 	PrintAndLog("Samples:");
 	PrintAndLog("  hf iclass writeblk b 0A d AAAAAAAAAAAAAAAA k 001122334455667B");
 	PrintAndLog("  hf iclass writeblk b 1B d AAAAAAAAAAAAAAAA k 001122334455667B c");
-	PrintAndLog("  hf iclass writeblk b 0A d AAAAAAAAAAAAAAAA n 0");
+	// PrintAndLog("  hf iclass writeblk b 0A d AAAAAAAAAAAAAAAA n 0"); # No reference to option `n` in implementation
 	return 0;
 }
 int usage_hf_iclass_readblock(void) {
@@ -229,7 +230,7 @@ int usage_hf_iclass_chk(void) {
 }
 int usage_hf_iclass_lookup(void) {
 	PrintAndLog("Lookup keys takes some sniffed trace data and tries to verify what key was used against a dictionary file");	
-	PrintAndLog("Usage: hf iclass lookup [h|e|r] [f  (*.dic)] [c <csn>] [p <epurse>] [m <macs>]");
+	PrintAndLog("Usage: hf iclass lookup [h|e|r] [f  (*.dic)] [u <csn>] [p <epurse>] [m <macs>]");
 	PrintAndLog("Options:");
 	PrintAndLog("      h             Show this help");
 	PrintAndLog("      f <filename>  Dictionary file with default iclass keys");
@@ -352,21 +353,29 @@ int CmdHFiClassSim(const char *Cmd) {
 	switch(simType) {
 		
 		case 2: {
-			PrintAndLog("Starting the sim 2 attack");
+			PrintAndLog("[+] Starting the sim 2 attack");
+			PrintAndLog("[+] press keyboard to cancel");
 			UsbCommand c = {CMD_SIMULATE_TAG_ICLASS, {simType, NUM_CSNS}};
 			UsbCommand resp = {0};
 			memcpy(c.d.asBytes, csns, 8*NUM_CSNS);
 			clearCommandBuffer();
 			SendCommand(&c);
-			// -1 make it wait all the time (iceman)
-			if (!WaitForResponseTimeout(CMD_ACK, &resp, -1)) {
-				PrintAndLog("Command timed out");
-				return 0;
-			}
+			
+			while (true) {
+				if (ukbhit()) {
+					int gc = getchar(); (void)gc;
+					PrintAndLog("[!] aborted via keyboard.");
+					return 0;
+				}
 
+				if (!WaitForResponseTimeout(CMD_ACK, &resp, 2000)) {
+					PrintAndLog("[!] timeout while waiting for reply.");
+					return 0;
+				}
+			}
 			uint8_t num_mac_responses  = resp.arg[1];
 			bool success = ( NUM_CSNS == num_mac_responses );
-			PrintAndLog("Mac responses: %d MACs obtained (should be %d) %s"
+			PrintAndLog("[+] Mac responses: %d MACs obtained (should be %d) %s"
 				, num_mac_responses
 				, NUM_CSNS
 				, (success) ? "OK":"FAIL"
@@ -379,7 +388,7 @@ int CmdHFiClassSim(const char *Cmd) {
 
 			void* dump = malloc(datalen);
 			if ( !dump ) {
-				PrintAndLog("Failed to allocate memory");
+				PrintAndLog("[!] Failed to allocate memory");
 				return 2;
 			}
 			
@@ -397,21 +406,30 @@ int CmdHFiClassSim(const char *Cmd) {
 			break;
 		}
 		case 4: {
-			PrintAndLog("Starting the sim 4 keyroll attack");
+			PrintAndLog("[+] Starting the sim 4 keyroll attack");
+			PrintAndLog("[+] press keyboard to cancel");
 			UsbCommand c = {CMD_SIMULATE_TAG_ICLASS, {simType, NUM_CSNS}};
 			UsbCommand resp = {0};
 			memcpy(c.d.asBytes, csns, 8*NUM_CSNS);
 			clearCommandBuffer();
 			SendCommand(&c);
-			// -1 make it wait all the time (iceman)
-			if (!WaitForResponseTimeout(CMD_ACK, &resp, -1)) {
-				PrintAndLog("Command timed out");
-				return 0;
+
+			while (true) {
+				if (ukbhit()) {
+					int gc = getchar(); (void)gc;
+					PrintAndLog("[!] aborted via keyboard.");
+					return 0;
+				}
+
+				if (!WaitForResponseTimeout(CMD_ACK, &resp, 2000)) {
+					PrintAndLog("[!] timeout while waiting for reply.");
+					return 0;
+				}
 			}
 
 			uint8_t num_mac_responses  = resp.arg[1];
 			bool success = ( (NUM_CSNS * 2) == num_mac_responses );
-			PrintAndLog("Mac responses: %d MACs obtained (should be %d) %s"
+			PrintAndLog("[+] Mac responses: %d MACs obtained (should be %d) %s"
 				, num_mac_responses
 				, NUM_CSNS * 2
 				, (success) ? "OK":"FAIL"
@@ -423,7 +441,7 @@ int CmdHFiClassSim(const char *Cmd) {
 			size_t datalen = NUM_CSNS * 24;
 			void* dump = malloc(datalen);
 			if ( !dump ) {
-				PrintAndLog("Failed to allocate memory");
+				PrintAndLog("[!] Failed to allocate memory");
 				return 2;
 			}
 			
