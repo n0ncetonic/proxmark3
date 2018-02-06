@@ -53,20 +53,7 @@ int usage_analyse_crc(void){
 	PrintAndLog("      analyse crc 137AF00A0A0D");
 	return 0;
 }
-int usage_analyse_hid(void){
-	PrintAndLog("Permute function from 'heart of darkness' paper.");
-	PrintAndLog("");
-	PrintAndLog("Usage:  analyse hid [h] <r|f> <bytes>");
-	PrintAndLog("Options:");
-	PrintAndLog("           h          This help");
-	PrintAndLog("           r          reverse permuted key");
-	PrintAndLog("           f          permute key");
-	PrintAndLog("           <bytes>    input bytes");
-	PrintAndLog("");
-	PrintAndLog("Samples:");
-	PrintAndLog("      analyse hid r 0123456789abcdef");
-	return 0;
-}
+
 int usage_analyse_nuid(void){
 	PrintAndLog("Generate 4byte NUID from 7byte UID");
 	PrintAndLog("");
@@ -452,39 +439,96 @@ int CmdAnalyseTEASelfTest(const char *Cmd){
 	return 0;
 }
 
+char* pb(uint32_t b) {
+	static char buf1[33] = {0};
+	static char buf2[33] = {0};
+	static char *s;
+	
+	if (s != buf1)
+		s = buf1;
+	else 
+		s = buf2;
+	
+	memset(s, 0, sizeof(buf1));
+	
+	uint32_t mask = 0x80000000;
+	for (uint8_t i=0; i<32;i++) {
+		s[i] = (mask & b)?'1':'0';
+		mask >>= 1;
+	}
+	return s;
+}
+
 int CmdAnalyseA(const char *Cmd){
 
-	uint8_t syncBit = 99;
+	//uint8_t syncBit = 99;
 	// The start bit is one ore more Sequence Y followed by a Sequence Z (... 11111111 00x11111). We need to distinguish from
 	// Sequence X followed by Sequence Y followed by Sequence Z     (111100x1 11111111 00x11111)
 	// we therefore look for a ...xx1111 11111111 00x11111xxxxxx... pattern 
 	// (12 '1's followed by 2 '0's, eventually followed by another '0', followed by 5 '1's)
-	# define SYNC_16BIT 0x4DB2
-	#define FELICA_STARTBIT_MASK	0x07FFEF80					// mask is    00000111 11111111 11101111 10000000
+	# define SYNC_16BIT 0xB24D
+	uint32_t shiftReg = param_get32ex(Cmd, 0, 0xb24d, 16);
+	uint8_t bt = param_get8ex(Cmd, 1, 0xBB, 16);
+	uint8_t byte_offset = 99;
+	// reverse byte
+	uint8_t rev =  reflect8(bt);
+	printf("input  %02x | %02x \n", bt, rev);
+	printf("shiftreg before  %08x \n", shiftReg);
+	// add byte to shift register
+	shiftReg = shiftReg << 8 | rev;
 
-	uint32_t shiftReg =  SYNC_16BIT;
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 0)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 1)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 2)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 3)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 4)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 5)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 6)));
-	printf("reg %04x \n",(shiftReg & (SYNC_16BIT >> 7)));
+	printf("shiftreg after %08x \n", shiftReg);
 	
-	for ( uint8_t i=0; i<32; i++){		
-		if		((shiftReg & (SYNC_16BIT >> 0)) == SYNC_16BIT >> 0) syncBit = 7;
-		else if ((shiftReg & (SYNC_16BIT >> 1)) == SYNC_16BIT >> 1) syncBit = 6;
-		else if ((shiftReg & (SYNC_16BIT >> 2)) == SYNC_16BIT >> 2) syncBit = 5;
-		else if ((shiftReg & (SYNC_16BIT >> 3)) == SYNC_16BIT >> 3) syncBit = 4;
-		else if ((shiftReg & (SYNC_16BIT >> 4)) == SYNC_16BIT >> 4) syncBit = 3;
-		else if ((shiftReg & (SYNC_16BIT >> 5)) == SYNC_16BIT >> 5) syncBit = 2;
-		else if ((shiftReg & (SYNC_16BIT >> 6)) == SYNC_16BIT >> 6) syncBit = 1;
-		else if ((shiftReg & (SYNC_16BIT >> 7)) == SYNC_16BIT >> 7) syncBit = 0;
+	printf("reg %04x \n", ( shiftReg >> 7 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 6 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 5 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 4 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 3 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 2 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 1 & 0xFFFF ));
+	printf("reg %04x \n", ( shiftReg >> 0 & 0xFFFF ));
+	
+	
+	// kolla om SYNC_PATTERN finns.
+	if (( shiftReg >> 7 & 0xFFFF ) == SYNC_16BIT) byte_offset = 7;
+	else if (( shiftReg >> 6 & 0xFFFF ) == SYNC_16BIT) byte_offset = 6;
+	else if (( shiftReg >> 5 & 0xFFFF ) == SYNC_16BIT) byte_offset = 5;
+	else if (( shiftReg >> 4 & 0xFFFF ) == SYNC_16BIT) byte_offset = 4;				
+	else if (( shiftReg >> 3 & 0xFFFF ) == SYNC_16BIT) byte_offset = 3;
+	else if (( shiftReg >> 2 & 0xFFFF ) == SYNC_16BIT) byte_offset = 2;
+	else if (( shiftReg >> 1 & 0xFFFF ) == SYNC_16BIT) byte_offset = 1;
+	else if (( shiftReg >> 0 & 0xFFFF ) == SYNC_16BIT) byte_offset = 0;
 
-		printf("ShiftReg is [%04x] | SyncBit is [%u]\n", shiftReg, syncBit);
-		shiftReg = shiftReg << 1 | ( shiftReg & 0x8000 ) >> 15;
+	if (byte_offset == 99 ) return 0;
+	//uint8_t p0 = 
+	uint8_t p1 = (rev & (uint8_t)(~(0xFF << byte_offset)));
+	printf("Offset  %u  | leftovers  %02x  %s \n", byte_offset, p1, pb(p1) );
+return 0;
+/*	
+	// split byte into two parts.
+	uint8_t offset = 3, n0 = 0, n1 = 0;
+	rev = 0xB2;
+	for (uint8_t m=0; m<8; m++) {
+		offset = m;
+		n0 = (rev & (uint8_t)(~(0xFF >> (8-offset)))) >> offset;
+		n1 = (n1 << offset) | (rev & (uint8_t)(~(0xFF << offset)));
+
+		printf("rev %02X | %02X %s | %02X %s |\n", rev, n0, pb(n0), n1, pb(n1) );
+		n0 = 0, n1 = 0;
+		// printf(" (0xFF >> offset) == %s |\n", pb( (0xFF >> offset)) );
+		//printf("~(0xFF >> (8-offset)) == %s |\n", pb(  (uint8_t)(~(0xFF >> (8-offset))) ) );
+		//printf(" rev & xxx == %s\n\n", pb( (rev & (uint8_t)(~(0xFF << offset))) ));
 	}
+return 0;	
+	// from A  -- x bits into B and the rest into C.
+	
+	for ( uint8_t i=0; i<8; i++){	
+		printf("%u | %02X %s | %02X %s |\n", i, a, pb(a), b, pb(b) );
+		b = a & (a & (0xFF >> (8-i)));
+		a >>=1;
+	}
+	
+	*/
 /*	
 pm3 --> da hex2bin 4db2     0100110110110010
 pm3 --> da hex2bin 926d9  10010010011011011001
@@ -717,108 +761,6 @@ uint64_t d2[] = {0x6e442129, 0x8f699195, 0x0000004, 0, 0x00040f0f0305030e};
 	return 0;
 }
 
-static void permute(uint8_t *data, uint8_t len, uint8_t *output){	
-#define KEY_SIZE 8
-
-	if ( len > KEY_SIZE ) {
-		for(uint8_t m = 0; m < len; m += KEY_SIZE){
-			permute(data+m, KEY_SIZE, output+m);
-		}
-		return;
-	}
-	if ( len != KEY_SIZE ) {
-		printf("wrong key size\n");
-		return;
-	}
-	uint8_t i,j,p, mask;
-	for( i=0; i < KEY_SIZE; ++i){
-		p = 0;
-		mask = 0x80 >> i;
-		for( j=0; j < KEY_SIZE; ++j){
-			p >>= 1;
-			if (data[j] & mask) 
-				p |= 0x80;
-		}
-		output[i] = p;
-	}
-}
-static void permute_rev(uint8_t *data, uint8_t len, uint8_t *output){
-	permute(data, len, output);
-	permute(output, len, data);
-	permute(data, len, output);
-}
-static void simple_crc(uint8_t *data, uint8_t len, uint8_t *output){
-	uint8_t crc = 0;
-	for( uint8_t i=0; i < len; ++i){
-		// seventh byte contains the crc.
-		if ( (i & 0x7) == 0x7 ) {
-			output[i] = crc ^ 0xFF;
-			crc = 0;
-		} else {
-			output[i] = data[i];
-			crc ^= data[i];
-		}
-	}
-}
-// DES doesn't use the MSB.
-static void shave(uint8_t *data, uint8_t len){
-	for (uint8_t i=0; i<len; ++i)
-		data[i] &= 0xFE;
-}
-static void generate_rev(uint8_t *data, uint8_t len) {
-	uint8_t *key = calloc(len,1);	
-	printf("input permuted key | %s \n", sprint_hex(data, len));
-	permute_rev(data, len, key);
-	printf("    unpermuted key | %s \n", sprint_hex(key, len));
-	shave(key, len);
-	printf("               key | %s \n", sprint_hex(key, len));
-	free(key);	
-}
-static void generate(uint8_t *data, uint8_t len) {
-	uint8_t *key = calloc(len,1);
-	uint8_t *pkey = calloc(len,1);	
-	printf("    input key | %s \n", sprint_hex(data, len));
-	permute(data, len, pkey);
-	printf(" permuted key | %s \n", sprint_hex(pkey, len));
-	simple_crc(pkey, len, key );
-	printf("   CRC'ed key | %s \n", sprint_hex(key, len));
-	free(key);
-	free(pkey);
-}
-int CmdAnalyseHid(const char *Cmd){
-
-	uint8_t key[8] = {0};	
-	uint8_t key_std_format[8] = {0};
-	uint8_t key_iclass_format[8] = {0};
-	uint8_t data[16] = {0};
-	bool isReverse = false;
-	int len = 0;
-	char cmdp = param_getchar(Cmd, 0);
-	if (strlen(Cmd) == 0|| cmdp == 'h' || cmdp == 'H') return usage_analyse_hid();
-		
-	if ( cmdp == 'r' || cmdp == 'R' ) 
-		isReverse = true;
-	
-	param_gethex_ex(Cmd, 1, data, &len);
-	if ( len%2 ) return usage_analyse_hid();
-	
-	len >>= 1;	
-
-	memcpy(key, data, 8);
-
-	if ( isReverse ) {
-		generate_rev(data, len);
-		permutekey_rev(key, key_std_format);
-		printf(" holiman iclass key | %s \n", sprint_hex(key_std_format, 8));
-	}
-	else {
-		generate(data, len);
-		permutekey(key, key_iclass_format);		
-		printf(" holiman std key | %s \n", sprint_hex(key_iclass_format, 8));
-	}
-	return 0;
-}
-
 void generate4bNUID(uint8_t *uid, uint8_t *nuid){
 	uint16_t crc;
 	uint8_t b1, b2;
@@ -875,7 +817,6 @@ static command_t CommandTable[] = {
 	{"tea",   	CmdAnalyseTEASelfTest,	1, "Crypto TEA test"},
 	{"lfsr",	CmdAnalyseLfsr,		1,	"LFSR tests"},
 	{"a",		CmdAnalyseA,		1,	"num bits test"},
-	{"hid",		CmdAnalyseHid,		1,	"Permute function from 'heart of darkness' paper"},
 	{"nuid",	CmdAnalyseNuid,		1,	"create NUID from 7byte UID"},
 	{NULL, NULL, 0, NULL}
 };

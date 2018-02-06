@@ -1159,19 +1159,20 @@ void SimulateIClass(uint32_t arg0, uint32_t arg1, uint32_t arg2, uint8_t *datain
 		// In this mode, a number of csns are within datain. We'll simulate each one, one at a time
 		// in order to collect MAC's from the reader. This can later be used in an offlne-attack
 		// in order to obtain the keys, as in the "dismantling iclass"-paper.
+		#define EPURSE_MAC_SIZE 16
 		int i = 0;
-		for (; i < numberOfCSNS && i*8 + 8 < USB_CMD_DATA_SIZE; i++) {
+		for (; i < numberOfCSNS && i * EPURSE_MAC_SIZE + 8 < USB_CMD_DATA_SIZE; i++) {
 			// The usb data is 512 bytes, fitting 65 8-byte CSNs in there.
 
 			memcpy(emulator, datain + (i*8), 8);
 			
-			if (doIClassSimulation(MODE_EXIT_AFTER_MAC, mac_responses+i*8)) {
+			if (doIClassSimulation(MODE_EXIT_AFTER_MAC, mac_responses+i * EPURSE_MAC_SIZE)) {
 				// Button pressed
-				cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i, 0, mac_responses, i*8);
+				cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i, 0, mac_responses, i * EPURSE_MAC_SIZE);
 				goto out;
 			}
 		}
-		cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i, 0, mac_responses, i*8);
+		cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i, 0, mac_responses, i * EPURSE_MAC_SIZE);
 
 	} else if (simType == 3){
 		//This is 'full sim' mode, where we use the emulator storage for data.
@@ -1192,26 +1193,26 @@ void SimulateIClass(uint32_t arg0, uint32_t arg1, uint32_t arg2, uint8_t *datain
 		// attack below is same as SIM 2, but we run the CSN twice to collected the mac for both keys.
 		int i = 0;
 		// The usb data is 512 bytes, fitting 65 8-byte CSNs in there.  iceman fork uses 9 CSNS
-		for (; i < numberOfCSNS && i*8 + 8 < USB_CMD_DATA_SIZE; i++) {
+		for (; i < numberOfCSNS && i * EPURSE_MAC_SIZE + 8 < USB_CMD_DATA_SIZE; i++) {
 
 			memcpy(emulator, datain + (i*8), 8);
 			
 			// keyroll 1 			
-			if (doIClassSimulation(MODE_EXIT_AFTER_MAC, mac_responses + i*8 )) {
-				cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i*2, 0, mac_responses, i * 8 * 2);
+			if (doIClassSimulation(MODE_EXIT_AFTER_MAC, mac_responses + i * EPURSE_MAC_SIZE )) {
+				cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i*2, 0, mac_responses, i * EPURSE_MAC_SIZE * 2);
 				// Button pressed
 				goto out; 
 			}
 
 			// keyroll 2
-			if (doIClassSimulation(MODE_EXIT_AFTER_MAC, mac_responses + (i + numberOfCSNS) * 8 )) {
-				cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i*2, 0, mac_responses, i * 8 * 2);
+			if (doIClassSimulation(MODE_EXIT_AFTER_MAC, mac_responses + (i + numberOfCSNS) * EPURSE_MAC_SIZE )) {
+				cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i*2, 0, mac_responses, i * EPURSE_MAC_SIZE* 2);
 				// Button pressed
 				goto out; 
 			}			
 		}
 		// double the amount of collected data.
-		cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i*2, 0, mac_responses, i * 8 * 2 );
+		cmd_send(CMD_ACK, CMD_SIMULATE_TAG_ICLASS, i*2, 0, mac_responses, i * EPURSE_MAC_SIZE * 2 );
 	
 	} else {
 		// We may want a mode here where we hardcode the csns to use (from proxclone).
@@ -1244,7 +1245,6 @@ int doIClassSimulation( int simulationMode, uint8_t *reader_mac_buf) {
 	uint8_t anticoll_data[10] = { 0 };
 	uint8_t csn_data[10] = { 0 };
 	memcpy(csn_data, csn, sizeof(csn_data));
-	Dbprintf("[+] Simulating CSN %02x%02x%02x%02x%02x%02x%02x%02x", csn[0], csn[1], csn[2], csn[3], csn[4], csn[5], csn[6], csn[7]);
 
 	// Construct anticollision-CSN
 	rotateCSN(csn_data, anticoll_data);
@@ -1256,6 +1256,7 @@ int doIClassSimulation( int simulationMode, uint8_t *reader_mac_buf) {
 	uint8_t diversified_key[8] = { 0 };
 	// e-Purse
 	uint8_t card_challenge_data[8] = { 0xfe,0xff,0xff,0xff,0xff,0xff,0xff,0xff };
+	//uint8_t card_challenge_data[8] = { 0 };
 	if (simulationMode == MODE_FULLSIM) {
 		//The diversified key should be stored on block 3
 		//Get the diversified key from emulator memory
@@ -1266,7 +1267,11 @@ int doIClassSimulation( int simulationMode, uint8_t *reader_mac_buf) {
 		//Precalculate the cipher state, feeding it the CC
 		cipher_state = opt_doTagMAC_1(card_challenge_data, diversified_key);
 	}
-
+	// set epurse of sim2,4 attack
+	if (reader_mac_buf != NULL)	{
+		memcpy(reader_mac_buf, card_challenge_data, 8);
+	}	
+	
 	int exitLoop = 0;
 	// Reader 0a
 	// Tag    0f
@@ -1321,50 +1326,26 @@ int doIClassSimulation( int simulationMode, uint8_t *reader_mac_buf) {
 	// First card answer: SOF
 	CodeIClassTagSOF();
 	memcpy(resp_sof, ToSend, ToSendMax); resp_sof_Len = ToSendMax;
-	if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
-		DbpString("SOF"); 
-		PrintToSendBuffer();
-	}
 	
 	// Anticollision CSN
 	CodeIClassTagAnswer(anticoll_data, sizeof(anticoll_data));
 	memcpy(resp_anticoll, ToSend, ToSendMax); resp_anticoll_len = ToSendMax;
-	if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
-		DbpString("ANTI COLL CSN"); 
-		PrintToSendBuffer();
-	}
 	
 	// CSN
 	CodeIClassTagAnswer(csn_data, sizeof(csn_data));
 	memcpy(resp_csn, ToSend, ToSendMax); resp_csn_len = ToSendMax;
-	if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
-		DbpString("CSN");
-		PrintToSendBuffer();
-	}
 
 	// Configuration
 	CodeIClassTagAnswer(conf_data, sizeof(conf_data));
 	memcpy(resp_conf, ToSend, ToSendMax); resp_conf_len = ToSendMax;
-	if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
-		DbpString("Configuration"); 
-		PrintToSendBuffer();
-	}
 	
 	// e-Purse
 	CodeIClassTagAnswer(card_challenge_data, sizeof(card_challenge_data));
 	memcpy(resp_cc, ToSend, ToSendMax); resp_cc_len = ToSendMax;
-	if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
-		DbpString("e-Purse"); 
-		PrintToSendBuffer();
-	}
 
 	// Application Issuer Area
 	CodeIClassTagAnswer(aia_data, sizeof(aia_data));
 	memcpy(resp_aia, ToSend, ToSendMax); resp_aia_len = ToSendMax;
-	if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
-		DbpString("Application Issuer Data"); 
-		PrintToSendBuffer();
-	}
 
 	//This is used for responding to READ-block commands or other data which is dynamically generated
 	//First the 'trace'-data, not encoded for FPGA
@@ -1436,6 +1417,10 @@ int doIClassSimulation( int simulationMode, uint8_t *reader_mac_buf) {
 						modulated_response = resp_cc; modulated_response_size = resp_cc_len;
 						trace_data = card_challenge_data;
 						trace_data_size = sizeof(card_challenge_data);
+						// set epurse of sim2,4 attack
+						if (reader_mac_buf != NULL)	{
+							memcpy(reader_mac_buf, card_challenge_data, 8);
+						}
 						break;
 					case 5:// Application Issuer Area (0c 05)
 						modulated_response = resp_aia; modulated_response_size = resp_aia_len;
@@ -1488,15 +1473,18 @@ int doIClassSimulation( int simulationMode, uint8_t *reader_mac_buf) {
 				trace_data_size = 0;
 				
 				if (simulationMode == MODE_EXIT_AFTER_MAC) {
-
-					Dbprintf("CSN: %02x %02x %02x %02x %02x %02x %02x %02x", csn[0], csn[1], csn[2], csn[3], csn[4], csn[5], csn[6], csn[7]);
-					Dbprintf("RDR:  (len=%02d): %02x %02x %02x %02x %02x %02x %02x %02x %02x", len,
+					
+					if ( MF_DBGLEVEL ==  MF_DBG_EXTENDED) {
+						Dbprintf("[+] CSN: %02x %02x %02x %02x %02x %02x %02x %02x", csn[0], csn[1], csn[2], csn[3], csn[4], csn[5], csn[6], csn[7]);
+						Dbprintf("[+] RDR:  (len=%02d): %02x %02x %02x %02x %02x %02x %02x %02x %02x", len,
 							receivedCmd[0], receivedCmd[1], receivedCmd[2],
 							receivedCmd[3], receivedCmd[4], receivedCmd[5],
 							receivedCmd[6], receivedCmd[7], receivedCmd[8]);
-
+					} else {
+						Dbprintf("[+] CSN: %02x .... %02x OK", csn[0], csn[7]);
+					}
 					if (reader_mac_buf != NULL)	{
-						memcpy(reader_mac_buf, receivedCmd+1, 8);
+						memcpy(reader_mac_buf + 8, receivedCmd+1, 8);
 					}
 					exitLoop = true;
 				}
@@ -1751,7 +1739,7 @@ static int GetIClassAnswer(uint8_t* receivedResponse, int maxLen, int *samples, 
 	// Set FPGA mode to "reader listen mode", no modulation (listen
 	// only, since we are receiving, not transmitting).
 	FpgaWriteConfWord(FPGA_MAJOR_MODE_HF_ISO14443A | FPGA_HF_ISO14443A_READER_LISTEN);
-	SpinDelayUs(330);  //310 Tout= 330us (iso15603-2)   (330/21.3) take consideration for clock increments.
+	SpinDelayUs(320);  //310 Tout= 330us (iso15603-2)   (330/21.3) take consideration for clock increments.
 
 	// clear RXRDY:
     uint8_t b = (uint8_t)AT91C_BASE_SSC->SSC_RHR;
@@ -1831,13 +1819,22 @@ void setupIclassReader() {
 }
 
 bool sendCmdGetResponseWithRetries(uint8_t* command, size_t cmdsize, uint8_t* resp, uint8_t expected_size, uint8_t retries) {
+	uint8_t got_n = 0;
 	while (retries-- > 0) {
 		
 		ReaderTransmitIClass(command, cmdsize);
 		
 		//iceman - if received size is bigger than expected, we smash the stack here
 		//		since its called with fixed sized arrays
-		if (expected_size == ReaderReceiveIClass(resp))
+		got_n = ReaderReceiveIClass(resp);
+		
+		// 0xBB is the internal debug separator byte..
+		if ( expected_size != got_n|| (resp[0] == 0xBB || resp[7] == 0xBB || resp[2] == 0xBB)) {
+			//try again
+			continue;
+		}
+	
+		if (got_n == expected_size)
 			return true;
 	}
 	return false;
@@ -1866,8 +1863,7 @@ uint8_t handshakeIclassTag_ext(uint8_t *card_data, bool use_credit_key) {
 
 	// Send act_all
 	ReaderTransmitIClass_ext(act_all, 1, 330+160);
-
-	// Card present?
+	// Card present?	
 	if (!ReaderReceiveIClass(resp)) return read_status;//Fail
 
 	//Send Identify
@@ -1884,7 +1880,7 @@ uint8_t handshakeIclassTag_ext(uint8_t *card_data, bool use_credit_key) {
 	ReaderTransmitIClass(select, sizeof(select));
 	
 	//We expect a 10-byte response here, 8 byte CSN and 2 byte CRC
-	len  = ReaderReceiveIClass(resp);
+	len = ReaderReceiveIClass(resp);
 	if (len != 10) return read_status;//Fail
 
 	//Success - level 1, we got CSN
@@ -1895,13 +1891,18 @@ uint8_t handshakeIclassTag_ext(uint8_t *card_data, bool use_credit_key) {
 	read_status = 1;
 
 	// Card selected, now read e-purse (cc) (block2) (only 8 bytes no CRC)
-	ReaderTransmitIClass(readcheck_cc, sizeof(readcheck_cc));
-	if (ReaderReceiveIClass(resp) == 8) {
-		//Save CC (e-purse) in response data
-		memcpy(card_data+8, resp, 8);
-		read_status++;
-	}
-
+//	ReaderTransmitIClass(readcheck_cc, sizeof(readcheck_cc));
+// if (ReaderReceiveIClass(resp) == 8) {
+		// //Save CC (e-purse) in response data
+		// memcpy(card_data+8, resp, 8);
+		// read_status++;
+	// }
+	bool isOK = sendCmdGetResponseWithRetries(readcheck_cc, sizeof(readcheck_cc), resp, 8, 3);
+	if (!isOK) return read_status;
+	
+	//Save CC (e-purse) in response data
+	memcpy(card_data+8, resp, 8);
+	read_status++;
 	return read_status;
 }
 uint8_t handshakeIclassTag(uint8_t *card_data){
@@ -2183,7 +2184,13 @@ void iClass_ReadCheck(uint8_t blockNo, uint8_t keyType) {
 void iClass_Authentication(uint8_t *mac) {
 	uint8_t check[] = { ICLASS_CMD_CHECK, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 	uint8_t resp[ICLASS_BUFFER_SIZE];
-	memcpy(check+5, mac, 4);
+
+	// copy MAC to check command (readersignature)
+	check[5] = mac[0];
+	check[6] = mac[1];
+	check[7] = mac[2];
+	check[8] = mac[3];
+	//memcpy(check+5, mac, 4);
 	
 	// 6 retries 
 	bool isOK = sendCmdGetResponseWithRetries(check, sizeof(check), resp, 4, 6);
@@ -2220,6 +2227,9 @@ void iClass_Authentication_fast(uint64_t arg0, uint64_t arg1, uint8_t *datain) {
 		
 	LED_A_ON();
 	
+	switch_off();
+	SpinDelay(20);
+	
 	setupIclassReader();
 
 	int read_status = 0;
@@ -2230,43 +2240,42 @@ void iClass_Authentication_fast(uint64_t arg0, uint64_t arg1, uint8_t *datain) {
 
 		read_status = handshakeIclassTag_ext(card_data, use_credit_key);
 		if ( startup_limit-- == 0 ) {
-			Dbprintf("Handshake status | %d (fail 10)", read_status);
+			Dbprintf("[-] Handshake status | %d (fail 10)", read_status);
 			isOK = 99;			
 			goto out;
 		}
 	};
+	// since handshakeIclassTag_ext call sends s readcheck,  we start with sending first response.
 		
 	// Keychunk loop
 	for (i = 0; i < keyCount; i++) {
-		
-		LED_C_INV();
 		
 		// Allow button press / usb cmd to interrupt device
 		if (BUTTON_PRESS() && !usb_poll_validate_length()) break;
 
 		WDT_HIT();
-
 		LED_B_ON();		
-		
-		// Auth Sequence MUST begin with reading e-purse. (block2)	
-		// Card selected, now read e-purse (cc) (block2) (only 8 bytes no CRC)		
-		ReaderTransmitIClass(readcheck_cc, sizeof(readcheck_cc));		
-		if (ReaderReceiveIClass(resp) == 8) {
-		}
-		
-		LED_B_OFF();
+	
 		// copy MAC to check command (readersignature)
 		check[5] = keys[i].mac[0];
 		check[6] = keys[i].mac[1];
 		check[7] = keys[i].mac[2];
 		check[8] = keys[i].mac[3];
 		
-		// expect 4bytes, 3 retries times..
-		isOK = sendCmdGetResponseWithRetries(check, sizeof(check), resp, 4, 2);
+		// expect 4bytes, 2 retries times..
+		isOK = sendCmdGetResponseWithRetries(check, sizeof(check), resp, 4, 3);
 		if ( isOK )
 			goto out;
 			
-		SpinDelayUs(350);  //iClass (iso15693-2) should timeout after 330us.
+		SpinDelayUs(400);  //iClass (iso15693-2) should timeout after 330us.
+
+		// Auth Sequence MUST begin with reading e-purse. (block2)	
+		// Card selected, now read e-purse (cc) (block2) (only 8 bytes no CRC)		
+		ReaderTransmitIClass(readcheck_cc, sizeof(readcheck_cc));		
+		// if (ReaderReceiveIClass(resp) == 8) {
+		// }
+		
+		LED_B_OFF();		
 	}
 	
 out:	
@@ -2283,22 +2292,23 @@ out:
 }
 
 // Tries to read block.
-// retries 5times.
+// retries 10times.
 bool iClass_ReadBlock(uint8_t blockNo, uint8_t *data, uint8_t len) {
-	//uint8_t resp[] = BigBuf_malloc(len);
-	uint8_t resp[20];
-	uint8_t cmd[] = {ICLASS_CMD_READ_OR_IDENTIFY, blockNo, 0x00, 0x00}; //0x88, 0x00 // can i use 0C?
+	uint8_t resp[10];
+	uint8_t cmd[] = {ICLASS_CMD_READ_OR_IDENTIFY, blockNo, 0x00, 0x00};
 	AddCrc( cmd+1, 1 );
-	bool isOK = sendCmdGetResponseWithRetries(cmd, sizeof(cmd), resp, len, 5);
+	// expect size 10,  retry 5times
+	bool isOK = sendCmdGetResponseWithRetries(cmd, sizeof(cmd), resp, 10, 5);
 	memcpy(data, resp, len);
 	return isOK;
 }
 
 // turn off afterwards
+// readblock 8 + 2.  only want 8.
 void iClass_ReadBlk(uint8_t blockno) {
 	uint8_t data[] = {0,0,0,0,0,0,0,0,0,0};
 	bool isOK = iClass_ReadBlock(blockno, data, sizeof(data));
-	cmd_send(CMD_ACK, isOK, 0, 0, data, 8);
+	cmd_send(CMD_ACK, isOK, 0, 0, data, sizeof(data));
 	switch_off(); 
 }
 
@@ -2311,7 +2321,7 @@ void iClass_Dump(uint8_t blockno, uint8_t numblks) {
 	BigBuf_free();
 	uint8_t *dataout = BigBuf_malloc(255*8);
 	if (dataout == NULL){
-		DbpString("out of memory");
+		DbpString("[!] out of memory");
 		OnError(1);
 		return;
 	}
@@ -2325,7 +2335,7 @@ void iClass_Dump(uint8_t blockno, uint8_t numblks) {
 		if (!isOK || (blockdata[0] == 0xBB || blockdata[7] == 0xBB || blockdata[2] == 0xBB)) { //try again
 			isOK = iClass_ReadBlock(blockno + blkCnt, blockdata, sizeof(blockdata));
 			if (!isOK) {
-				Dbprintf("Block %02X failed to read", blkCnt + blockno);
+				Dbprintf("[!] block %02X failed to read", blkCnt + blockno);
 				break;
 			}
 		}
@@ -2350,7 +2360,7 @@ bool iClass_WriteBlock_ext(uint8_t blockNo, uint8_t *data) {
 		//if response is not equal to write values
 		if (memcmp(write + 2, resp, 8)) {
 
-		//if not programming key areas (note key blocks don't get programmed with actual key data it is xor data)
+			//if not programming key areas (note key blocks don't get programmed with actual key data it is xor data)
 			if (blockNo != 3 && blockNo != 4) {
 				isOK = sendCmdGetResponseWithRetries(write, sizeof(write), resp, sizeof(resp), 5);
 			} 			
@@ -2362,11 +2372,6 @@ bool iClass_WriteBlock_ext(uint8_t blockNo, uint8_t *data) {
 // turn off afterwards
 void iClass_WriteBlock(uint8_t blockNo, uint8_t *data) {
 	bool isOK = iClass_WriteBlock_ext(blockNo, data);
-	if (isOK)
-		Dbprintf("Write block [%02x] successful", blockNo);
-    else
-		Dbprintf("Write block [%02x] failed", blockNo);		
-	
 	cmd_send(CMD_ACK,isOK,0,0,0,0);
 	switch_off(); 
 }
